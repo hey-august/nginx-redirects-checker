@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nginx Redirects Checker</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --panel: #16213e;
+    --border: #0f3460;
+    --text: #e4e4e4;
+    --muted: #888;
+    --accent: #e94560;
+    --green: #4ecca3;
+    --yellow: #f0c040;
+    --blue: #4ea8de;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .stats { color: var(--muted); font-size: 13px; margin-left: auto; }
+  header .stats span { margin-left: 12px; }
+  .stat-approved { color: var(--green); }
+  .stat-flagged { color: var(--accent); }
+  .stat-pending { color: var(--yellow); }
+
+  /* URL prefix bar */
+  .prefix-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .prefix-bar label { color: var(--muted); white-space: nowrap; }
+  .prefix-bar input[type="text"] {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+    width: 280px;
+  }
+  .prefix-bar .filter-group { margin-left: 20px; display: flex; gap: 6px; align-items: center; }
+  .prefix-bar select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 13px;
+  }
+
+  /* Main layout — three columns with draggable dividers */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Panels */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 180px;
+  }
+  .panel-header {
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  /* Draggable dividers */
+  .divider {
+    width: 5px;
+    cursor: col-resize;
+    background: var(--border);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 10;
+    transition: background 0.15s;
+  }
+  .divider:hover, .divider.active {
+    background: var(--blue);
+  }
+
+  /* Horizontal divider inside preview panel */
+  .h-divider {
+    height: 5px;
+    cursor: row-resize;
+    background: var(--border);
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  .h-divider:hover, .h-divider.active {
+    background: var(--blue);
+  }
+
+  /* Redirect list items */
+  .redirect-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    cursor: pointer;
+    font-size: 13px;
+    gap: 8px;
+    transition: background 0.1s;
+  }
+  .redirect-item:hover { background: rgba(255,255,255,0.04); }
+  .redirect-item.active { background: rgba(78, 168, 222, 0.15); }
+  .redirect-item .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .redirect-item .status-dot.pending { background: var(--muted); }
+  .redirect-item .status-dot.approved { background: var(--green); }
+  .redirect-item .status-dot.flagged { background: var(--accent); }
+  .redirect-item .from-path {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .redirect-item .line-num {
+    color: var(--muted);
+    font-size: 11px;
+    flex-shrink: 0;
+    width: 35px;
+    text-align: right;
+  }
+
+  /* Detail panel (middle) */
+  .detail-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 250px;
+  }
+  .detail-content {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+  }
+  .detail-row { margin-bottom: 12px; }
+  .detail-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .detail-value {
+    font-size: 13px;
+    word-break: break-all;
+    padding: 6px 10px;
+    background: var(--bg);
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  .detail-value a { color: var(--blue); text-decoration: none; }
+  .detail-value a:hover { text-decoration: underline; }
+  .detail-value.homepage-redirect {
+    border-color: var(--yellow);
+    opacity: 0.7;
+  }
+
+  /* Notes */
+  .notes-area {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 8px 12px;
+    resize: vertical;
+    min-height: 50px;
+  }
+  .notes-area:focus { outline: none; border-color: var(--blue); }
+
+  /* Action buttons */
+  .actions {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .btn:hover { filter: brightness(1.2); }
+  .btn-approve { border-color: var(--green); color: var(--green); }
+  .btn-approve:hover { background: var(--green); color: #000; }
+  .btn-flag { border-color: var(--accent); color: var(--accent); }
+  .btn-flag:hover { background: var(--accent); color: #fff; }
+  .btn-skip { border-color: var(--muted); color: var(--muted); }
+  .btn-reset { border-color: var(--yellow); color: var(--yellow); }
+
+  .hotkey {
+    display: inline-block;
+    background: rgba(255,255,255,0.1);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    margin-left: 4px;
+  }
+
+  .nav-buttons { display: flex; gap: 6px; margin-left: auto; }
+  .btn-nav { padding: 6px 10px; font-size: 11px; }
+
+  /* Export bar */
+  .export-bar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--panel);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .btn-export { padding: 5px 10px; font-size: 11px; }
+  .export-info { color: var(--muted); font-size: 11px; margin-left: auto; }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--muted);
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  /* Search */
+  .search-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    width: 100%;
+  }
+  .search-input:focus { outline: none; border-color: var(--blue); }
+
+  /* Preview panel (right) */
+  .preview-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 300px;
+  }
+  .preview-frame-wrap {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 80px;
+  }
+  .preview-frame-wrap .frame-label {
+    padding: 6px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .frame-label .frame-url {
+    font-size: 11px;
+    color: var(--blue);
+    text-transform: none;
+    letter-spacing: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  .zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .zoom-btn {
+    width: 22px;
+    height: 22px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    font-family: inherit;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+    transition: all 0.15s;
+  }
+  .zoom-btn:hover { border-color: var(--blue); color: var(--blue); }
+  .zoom-level {
+    font-size: 10px;
+    color: var(--muted);
+    min-width: 32px;
+    text-align: center;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .iframe-clip {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    margin: 6px 8px;
+  }
+  .iframe-clip::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 8px;
+    pointer-events: none;
+    z-index: 1;
+    box-shadow: 0 0 0 4px var(--bg);
+  }
+  #preview-from-wrap .iframe-clip::after {
+    background: linear-gradient(135deg, rgba(233,69,96,0.12) 0%, rgba(240,160,50,0.06) 60%, transparent 100%);
+    box-shadow: 0 0 0 4px var(--bg), inset 0 0 0 1px rgba(233,69,96,0.18);
+  }
+  #preview-to-wrap .iframe-clip::after {
+    background: linear-gradient(135deg, rgba(78,168,222,0.12) 0%, rgba(78,204,163,0.06) 60%, transparent 100%);
+    box-shadow: 0 0 0 4px var(--bg), inset 0 0 0 1px rgba(78,204,163,0.18);
+  }
+  .iframe-clip iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: none;
+    background: #fff;
+    transform-origin: 0 0;
+  }
+  .iframe-placeholder {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 13px;
+    background: #111;
+  }
+
+  /* Drag overlay to prevent iframe stealing mouse events */
+  .drag-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 9999;
+    cursor: col-resize;
+  }
+  .drag-overlay.active { display: block; }
+  .drag-overlay.row-resize { cursor: row-resize; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Nginx Redirects Checker</h1>
+  <div class="stats">
+    <span class="stat-approved">Approved: <strong id="count-approved">0</strong></span>
+    <span class="stat-flagged">Flagged: <strong id="count-flagged">0</strong></span>
+    <span class="stat-pending">Pending: <strong id="count-pending">0</strong></span>
+    <span>Total: <strong id="count-total">0</strong></span>
+  </div>
+</header>
+
+<div class="prefix-bar">
+  <label>From prefix:</label>
+  <input type="text" id="from-prefix" value="http://localhost:3000" placeholder="e.g., http://localhost:3000">
+  <label>To prefix:</label>
+  <input type="text" id="to-prefix" value="" placeholder="(none — URLs are absolute)">
+  <div class="filter-group">
+    <label>Show:</label>
+    <select id="filter-status">
+      <option value="all">All</option>
+      <option value="pending">Pending</option>
+      <option value="approved">Approved</option>
+      <option value="flagged">Flagged</option>
+    </select>
+  </div>
+</div>
+
+<div class="main" id="main">
+  <!-- Panel 1: Redirect list -->
+  <div class="panel" id="panel-list" style="width: 22%;">
+    <div class="panel-header">
+      <span>Redirects</span>
+      <input type="text" class="search-input" id="search" placeholder="Search..." style="width: 140px; margin-left: auto;">
+    </div>
+    <div class="panel-body" id="redirect-list"></div>
+  </div>
+
+  <div class="divider" id="divider-1"></div>
+
+  <!-- Panel 2: Details + actions -->
+  <div class="detail-panel" id="panel-detail" style="width: 28%;">
+    <div class="panel-header">
+      <span>Details</span>
+      <div class="nav-buttons">
+        <button class="btn btn-nav btn-skip" onclick="navigate(-1)">&#9650; <span class="hotkey">K</span></button>
+        <button class="btn btn-nav btn-skip" onclick="navigate(1)">&#9660; <span class="hotkey">J</span></button>
+      </div>
+    </div>
+    <div class="detail-content" id="detail-content">
+      <div class="empty-state">Load a redirects.map file or paste content to begin</div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-approve" onclick="markStatus('approved')">Approve <span class="hotkey">A</span></button>
+      <button class="btn btn-flag" onclick="markStatus('flagged')">Flag <span class="hotkey">F</span></button>
+      <button class="btn btn-reset" onclick="markStatus('pending')">Reset <span class="hotkey">R</span></button>
+      <button class="btn btn-skip" onclick="navigate(1)">Skip <span class="hotkey">J</span></button>
+    </div>
+    <div class="export-bar">
+      <button class="btn btn-export" onclick="exportFlagged()">Export flagged</button>
+      <button class="btn btn-export" onclick="exportAll()">Export all</button>
+      <button class="btn btn-export" onclick="importState()">Import</button>
+      <button class="btn btn-export" onclick="saveSession()">Save</button>
+      <span class="export-info" id="save-status">Auto-saved</span>
+    </div>
+  </div>
+
+  <div class="divider" id="divider-2"></div>
+
+  <!-- Panel 3: Preview iframes -->
+  <div class="preview-panel" id="panel-preview" style="width: 50%;">
+    <div class="panel-header"><span>Preview</span></div>
+    <div class="preview-frame-wrap" id="preview-from-wrap">
+      <div class="frame-label">
+        <span>From</span>
+        <span class="frame-url" id="preview-from-url">—</span>
+        <div class="zoom-controls">
+          <button class="zoom-btn" onclick="zoom('from', -1)">−</button>
+          <span class="zoom-level" id="zoom-from-level">100%</span>
+          <button class="zoom-btn" onclick="zoom('from', 1)">+</button>
+          <button class="zoom-btn" onclick="reloadFrame('from')" title="Reload">↻</button>
+        </div>
+      </div>
+      <div class="iframe-placeholder" id="placeholder-from">Select a redirect to preview</div>
+    </div>
+    <div class="h-divider" id="h-divider"></div>
+    <div class="preview-frame-wrap" id="preview-to-wrap">
+      <div class="frame-label">
+        <span>To</span>
+        <span class="frame-url" id="preview-to-url">—</span>
+        <div class="zoom-controls">
+          <button class="zoom-btn" onclick="zoom('to', -1)">−</button>
+          <span class="zoom-level" id="zoom-to-level">100%</span>
+          <button class="zoom-btn" onclick="zoom('to', 1)">+</button>
+          <button class="zoom-btn" onclick="reloadFrame('to')" title="Reload">↻</button>
+        </div>
+      </div>
+      <div class="iframe-placeholder" id="placeholder-to">Select a redirect to preview</div>
+    </div>
+  </div>
+</div>
+
+<!-- Overlay to prevent iframes from capturing mouse during drag -->
+<div class="drag-overlay" id="drag-overlay"></div>
+
+<script>
+// ─── State ───────────────────────────────────────────────────────
+let redirects = [];
+let filteredIds = [];
+let selectedId = null;
+let changeCount = 0;
+let serverSaveTimer = null;
+const STORAGE_KEY = 'redirect-checker-state';
+const SERVER_SAVE_DEBOUNCE = 3000;
+
+// ─── Parse redirects.map ─────────────────────────────────────────
+function parseRedirects(text) {
+  const lines = text.split('\n');
+  const raw = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line || line.startsWith('#')) continue;
+    const match = line.match(/^(\S+)\s+(\S+?);?\s*$/);
+    if (match) raw.push({ line: i + 1, from: match[1], to: match[2].replace(/;$/, '') });
+  }
+  const seen = new Map();
+  const results = [];
+  for (const entry of raw) {
+    const canonical = entry.from.replace(/\/$/, '') || '/';
+    if (seen.has(canonical)) {
+      seen.get(canonical).alsoLines.push(entry.line);
+    } else {
+      const item = { id: results.length, line: entry.line, from: canonical, to: entry.to, status: 'pending', notes: '', alsoLines: [] };
+      seen.set(canonical, item);
+      results.push(item);
+    }
+  }
+  return results;
+}
+
+// ─── Load data ───────────────────────────────────────────────────
+function parseCSVState(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return null;
+  // header: line,from,to,status,notes
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const m = lines[i].match(/^(\d+),"([^"]*)","([^"]*)","([^"]*)","((?:[^"]|"")*)"$/);
+    if (!m) continue;
+    rows.push({
+      id: rows.length,
+      line: parseInt(m[1]),
+      from: m[2],
+      to: m[3],
+      status: m[4] || 'pending',
+      notes: m[5].replace(/""/g, '"'),
+      alsoLines: []
+    });
+  }
+  return rows.length > 0 ? rows : null;
+}
+
+async function loadData() {
+  // Priority 1: server-persisted CSV
+  try {
+    const resp = await fetch('review-state.csv');
+    if (resp.ok) {
+      const parsed = parseCSVState(await resp.text());
+      if (parsed) {
+        redirects = parsed;
+        applyFilter();
+        if (redirects.length > 0) selectItem(0);
+        updateStats();
+        return;
+      }
+    }
+  } catch(e) {}
+
+  // Priority 2: localStorage
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try {
+      redirects = JSON.parse(saved).redirects;
+      applyFilter();
+      if (redirects.length > 0) selectItem(0);
+      updateStats();
+      return;
+    } catch(e) {}
+  }
+
+  // Priority 3: fresh parse
+  try {
+    const resp = await fetch('redirects.map');
+    if (resp.ok) {
+      redirects = parseRedirects(await resp.text());
+      applyFilter();
+      if (redirects.length > 0) selectItem(0);
+      updateStats();
+    }
+  } catch(e) {}
+}
+
+// ─── Render list ─────────────────────────────────────────────────
+function renderList() {
+  const container = document.getElementById('redirect-list');
+  container.innerHTML = filteredIds.map(id => {
+    const r = redirects[id];
+    return `<div class="redirect-item ${id === selectedId ? 'active' : ''}" data-id="${id}" onclick="selectItem(${id})">
+      <span class="status-dot ${r.status}"></span>
+      <span class="line-num">${r.line}</span>
+      <span class="from-path">${escHtml(r.from)}</span>
+    </div>`;
+  }).join('');
+  const activeEl = container.querySelector('.active');
+  if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ─── Select item ─────────────────────────────────────────────────
+function selectItem(id) {
+  selectedId = id;
+  renderList();
+  renderDetail();
+  renderPreviews();
+}
+
+// ─── Render detail ───────────────────────────────────────────────
+function renderDetail() {
+  const el = document.getElementById('detail-content');
+  if (selectedId === null) {
+    el.innerHTML = '<div class="empty-state">Select a redirect to review</div>';
+    return;
+  }
+  const r = redirects[selectedId];
+  const fullFrom = document.getElementById('from-prefix').value + r.from;
+  const fullTo = document.getElementById('to-prefix').value + r.to;
+  const isHomepage = r.to.endsWith('/docs') || r.to.endsWith('/docs/');
+  const hc = isHomepage ? 'homepage-redirect' : '';
+  const dupeInfo = r.alsoLines.length > 0
+    ? `<div class="detail-row"><div class="detail-label">Deduplicated</div><div class="detail-value">Lines ${r.alsoLines.join(', ')} (trailing /)</div></div>`
+    : '';
+  el.innerHTML = `
+    <div class="detail-row">
+      <div class="detail-label">From (line ${r.line})</div>
+      <div class="detail-value ${hc}"><a href="${escHtml(fullFrom)}" target="_blank">${escHtml(fullFrom)}</a></div>
+    </div>
+    <div class="detail-row">
+      <div class="detail-label">To</div>
+      <div class="detail-value ${hc}"><a href="${escHtml(fullTo)}" target="_blank">${escHtml(fullTo)}</a></div>
+    </div>
+    ${dupeInfo}
+    <div class="detail-row">
+      <div class="detail-label">Status: <strong style="color:${statusColor(r.status)}">${r.status.toUpperCase()}</strong></div>
+    </div>
+    <div class="detail-row">
+      <div class="detail-label">Notes</div>
+      <textarea class="notes-area" id="notes-input" placeholder="Add notes..."
+        oninput="updateNotes(this.value)">${escHtml(r.notes)}</textarea>
+    </div>`;
+}
+
+// ─── Render previews ─────────────────────────────────────────────
+function renderPreviews() {
+  const fromWrap = document.getElementById('preview-from-wrap');
+  const toWrap = document.getElementById('preview-to-wrap');
+  const fromUrlEl = document.getElementById('preview-from-url');
+  const toUrlEl = document.getElementById('preview-to-url');
+
+  if (selectedId === null) {
+    setPlaceholder(fromWrap, 'placeholder-from', 'Select a redirect to preview');
+    setPlaceholder(toWrap, 'placeholder-to', 'Select a redirect to preview');
+    fromUrlEl.textContent = '—';
+    toUrlEl.textContent = '—';
+    return;
+  }
+
+  const r = redirects[selectedId];
+  const fullFrom = document.getElementById('from-prefix').value + r.from;
+  const fullTo = document.getElementById('to-prefix').value + r.to;
+
+  fromUrlEl.textContent = fullFrom;
+  toUrlEl.textContent = fullTo;
+
+  setIframe(fromWrap, 'iframe-from', fullFrom, 'placeholder-from');
+  setIframe(toWrap, 'iframe-to', fullTo, 'placeholder-to');
+}
+
+function setIframe(wrap, iframeId, url, placeholderId) {
+  const ph = document.getElementById(placeholderId);
+  if (ph) ph.remove();
+
+  let clip = wrap.querySelector('.iframe-clip');
+  if (!clip) {
+    clip = document.createElement('div');
+    clip.className = 'iframe-clip';
+    wrap.appendChild(clip);
+  }
+
+  let iframe = document.getElementById(iframeId);
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = iframeId;
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
+    iframe.setAttribute('loading', 'lazy');
+    clip.appendChild(iframe);
+  }
+  iframe.src = url;
+
+  // Re-apply current zoom
+  const which = iframeId.replace('iframe-', '');
+  applyZoom(which);
+}
+
+function setPlaceholder(wrap, placeholderId, text) {
+  const clip = wrap.querySelector('.iframe-clip');
+  if (clip) clip.remove();
+  if (!document.getElementById(placeholderId)) {
+    const ph = document.createElement('div');
+    ph.className = 'iframe-placeholder';
+    ph.id = placeholderId;
+    ph.textContent = text;
+    wrap.appendChild(ph);
+  }
+}
+
+function statusColor(s) {
+  return s === 'approved' ? 'var(--green)' : s === 'flagged' ? 'var(--accent)' : 'var(--muted)';
+}
+
+// ─── Actions ─────────────────────────────────────────────────────
+function markStatus(status) {
+  if (selectedId === null) return;
+  redirects[selectedId].status = status;
+  changeCount++;
+  autoSave();
+  updateStats();
+  navigate(1);
+}
+
+function updateNotes(val) {
+  if (selectedId === null) return;
+  redirects[selectedId].notes = val;
+  autoSave();
+}
+
+function navigate(dir) {
+  if (filteredIds.length === 0) return;
+  const idx = filteredIds.indexOf(selectedId);
+  let next = idx + dir;
+  if (next < 0) next = 0;
+  if (next >= filteredIds.length) next = filteredIds.length - 1;
+  selectItem(filteredIds[next]);
+}
+
+function applyFilter() {
+  const status = document.getElementById('filter-status').value;
+  const search = (document.getElementById('search').value || '').toLowerCase();
+  filteredIds = redirects
+    .filter(r => {
+      if (status !== 'all' && r.status !== status) return false;
+      if (search && !r.from.toLowerCase().includes(search) && !r.to.toLowerCase().includes(search)) return false;
+      return true;
+    })
+    .map(r => r.id);
+  renderList();
+}
+
+function updateStats() {
+  const counts = { approved: 0, flagged: 0, pending: 0 };
+  redirects.forEach(r => counts[r.status]++);
+  document.getElementById('count-approved').textContent = counts.approved;
+  document.getElementById('count-flagged').textContent = counts.flagged;
+  document.getElementById('count-pending').textContent = counts.pending;
+  document.getElementById('count-total').textContent = redirects.length;
+}
+
+// ─── Persistence ─────────────────────────────────────────────────
+function autoSave() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ redirects }));
+  // Debounced server save
+  clearTimeout(serverSaveTimer);
+  serverSaveTimer = setTimeout(serverSave, SERVER_SAVE_DEBOUNCE);
+}
+
+async function serverSave() {
+  const statusEl = document.getElementById('save-status');
+  try {
+    const resp = await fetch('/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirects, changeCount })
+    });
+    if (resp.ok) {
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      statusEl.textContent = `Saved ${now}`;
+      statusEl.style.color = '';
+    } else {
+      statusEl.textContent = 'Save failed';
+      statusEl.style.color = 'var(--accent)';
+    }
+  } catch(e) {
+    statusEl.textContent = 'Save failed';
+    statusEl.style.color = 'var(--accent)';
+  }
+}
+
+function saveSession() {
+  const blob = new Blob([JSON.stringify({ redirects }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'redirect-checker-session.json';
+  a.click();
+}
+
+function importState() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.onchange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const state = JSON.parse(await file.text());
+    redirects = state.redirects;
+    applyFilter();
+    if (redirects.length > 0) selectItem(0);
+    updateStats();
+    autoSave();
+  };
+  input.click();
+}
+
+function exportFlagged() {
+  const flagged = redirects.filter(r => r.status === 'flagged');
+  let csv = 'line,from,to,notes\n';
+  flagged.forEach(r => {
+    csv += `${r.line},"${r.from}","${r.to}","${r.notes.replace(/"/g, '""')}"\n`;
+  });
+  downloadCsv(csv, 'flagged-redirects.csv');
+}
+
+function exportAll() {
+  let csv = 'line,from,to,status,notes\n';
+  redirects.forEach(r => {
+    csv += `${r.line},"${r.from}","${r.to}","${r.status}","${r.notes.replace(/"/g, '""')}"\n`;
+  });
+  downloadCsv(csv, 'all-redirects.csv');
+}
+
+function downloadCsv(csv, filename) {
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+}
+
+// ─── Zoom controls ───────────────────────────────────────────────
+const zoomLevels = { from: 100, to: 100 };
+const ZOOM_STEP = 15;
+const ZOOM_MIN = 25;
+const ZOOM_MAX = 200;
+
+function zoom(which, dir) {
+  let level = zoomLevels[which] + dir * ZOOM_STEP;
+  level = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, level));
+  zoomLevels[which] = level;
+  applyZoom(which);
+}
+
+function applyZoom(which) {
+  const level = zoomLevels[which];
+  const scale = level / 100;
+  const iframe = document.getElementById('iframe-' + which);
+  if (iframe) {
+    // Scale the iframe down/up, but make it inversely larger/smaller
+    // so it fills the clip container and content appears zoomed
+    iframe.style.transform = `scale(${scale})`;
+    iframe.style.width = (100 / scale) + '%';
+    iframe.style.height = (100 / scale) + '%';
+  }
+  document.getElementById(`zoom-${which}-level`).textContent = level + '%';
+}
+
+function reloadFrame(which) {
+  const iframe = document.getElementById('iframe-' + which);
+  if (iframe) iframe.src = iframe.src;
+}
+
+// ─── Keyboard shortcuts ─────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  switch(e.key.toLowerCase()) {
+    case 'a': markStatus('approved'); e.preventDefault(); break;
+    case 'f': markStatus('flagged'); e.preventDefault(); break;
+    case 'r': if (!e.metaKey && !e.ctrlKey) { markStatus('pending'); e.preventDefault(); } break;
+    case 'j': case 'arrowdown': navigate(1); e.preventDefault(); break;
+    case 'k': case 'arrowup': navigate(-1); e.preventDefault(); break;
+    case 'n': document.getElementById('notes-input')?.focus(); e.preventDefault(); break;
+    case '/': document.getElementById('search').focus(); e.preventDefault(); break;
+  }
+});
+
+// ─── Event listeners ─────────────────────────────────────────────
+document.getElementById('filter-status').addEventListener('change', applyFilter);
+document.getElementById('search').addEventListener('input', applyFilter);
+document.getElementById('from-prefix').addEventListener('input', () => { renderDetail(); renderPreviews(); });
+document.getElementById('to-prefix').addEventListener('input', () => { renderDetail(); renderPreviews(); });
+
+// ─── Draggable column dividers ───────────────────────────────────
+(function initColumnDividers() {
+  const main = document.getElementById('main');
+  const overlay = document.getElementById('drag-overlay');
+  const panelList = document.getElementById('panel-list');
+  const panelDetail = document.getElementById('panel-detail');
+  const panelPreview = document.getElementById('panel-preview');
+  const divider1 = document.getElementById('divider-1');
+  const divider2 = document.getElementById('divider-2');
+
+  let dragging = null; // 'divider-1' or 'divider-2'
+  let startX = 0;
+  let startWidths = {};
+
+  function onMouseDown(e, which) {
+    e.preventDefault();
+    dragging = which;
+    startX = e.clientX;
+    startWidths = {
+      list: panelList.offsetWidth,
+      detail: panelDetail.offsetWidth,
+      preview: panelPreview.offsetWidth,
+    };
+    overlay.classList.add('active');
+    document.getElementById(which).classList.add('active');
+  }
+
+  divider1.addEventListener('mousedown', (e) => onMouseDown(e, 'divider-1'));
+  divider2.addEventListener('mousedown', (e) => onMouseDown(e, 'divider-2'));
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const totalWidth = main.offsetWidth - 10; // minus 2 dividers (5px each)
+
+    if (dragging === 'divider-1') {
+      let newList = Math.max(180, startWidths.list + dx);
+      let newDetail = startWidths.detail - dx;
+      if (newDetail < 250) {
+        newDetail = 250;
+        newList = startWidths.list + startWidths.detail - 250;
+      }
+      panelList.style.width = newList + 'px';
+      panelDetail.style.width = newDetail + 'px';
+    } else {
+      let newDetail = Math.max(250, startWidths.detail + dx);
+      let newPreview = startWidths.preview - dx;
+      if (newPreview < 300) {
+        newPreview = 300;
+        newDetail = startWidths.detail + startWidths.preview - 300;
+      }
+      panelDetail.style.width = newDetail + 'px';
+      panelPreview.style.width = newPreview + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    overlay.classList.remove('active');
+    document.getElementById(dragging).classList.remove('active');
+    dragging = null;
+  });
+})();
+
+// ─── Draggable horizontal divider (preview split) ────────────────
+(function initHDivider() {
+  const overlay = document.getElementById('drag-overlay');
+  const hDivider = document.getElementById('h-divider');
+  const fromWrap = document.getElementById('preview-from-wrap');
+  const toWrap = document.getElementById('preview-to-wrap');
+
+  let dragging = false;
+  let startY = 0;
+  let startFromH = 0;
+  let startToH = 0;
+
+  hDivider.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    dragging = true;
+    startY = e.clientY;
+    startFromH = fromWrap.offsetHeight;
+    startToH = toWrap.offsetHeight;
+    overlay.classList.add('active', 'row-resize');
+    hDivider.classList.add('active');
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dy = e.clientY - startY;
+    let newFrom = startFromH + dy;
+    let newTo = startToH - dy;
+    if (newFrom < 80) { newFrom = 80; newTo = startFromH + startToH - 80; }
+    if (newTo < 80) { newTo = 80; newFrom = startFromH + startToH - 80; }
+    fromWrap.style.flex = 'none';
+    toWrap.style.flex = 'none';
+    fromWrap.style.height = newFrom + 'px';
+    toWrap.style.height = newTo + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    overlay.classList.remove('active', 'row-resize');
+    hDivider.classList.remove('active');
+  });
+})();
+
+// ─── Init ────────────────────────────────────────────────────────
+loadData();
+</script>
+</body>
+</html>

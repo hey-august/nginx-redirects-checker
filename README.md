@@ -2,6 +2,8 @@
 
 Visual review tool for nginx redirect maps. Shows side-by-side iframe previews of the old (from) and new (to) URLs so you can approve, flag, or annotate each redirect.
 
+<img width="1822" height="1181" alt="Screenshot 2026-03-17 at 11 48 57 AM" src="https://github.com/user-attachments/assets/ed6625da-ca90-497b-904b-b3fbb3cfd47b" />
+
 ## Setup
 
 Grab the redirect map from the [`Devon/new-redirects`](https://github.com/signalwire/docs/blob/Devon/new-redirects/website/provisioning/nginx/redirects.map) branch of `signalwire/docs` and place it in this directory:

@@ -247,6 +247,7 @@
     color: var(--text);
   }
   .btn:hover { filter: brightness(1.2); }
+  .btn-sm { padding: 2px 8px; font-size: 11px; margin-left: 8px; vertical-align: middle; }
   .btn-approve { border-color: var(--green); color: var(--green); }
   .btn-approve:hover { background: var(--green); color: #000; }
   .btn-flag { border-color: var(--accent); color: var(--accent); }
@@ -441,7 +442,7 @@
 
 <div class="prefix-bar">
   <label>From prefix:</label>
-  <input type="text" id="from-prefix" value="http://localhost:3000" placeholder="e.g., http://localhost:3000">
+  <input type="text" id="from-prefix" value="https://deploy-preview-819--signalwire-docs.netlify.app" placeholder="e.g., https://deploy-preview-819--signalwire-docs.netlify.app">
   <label>To prefix:</label>
   <input type="text" id="to-prefix" value="" placeholder="(none — URLs are absolute)">
   <div class="filter-group">
@@ -460,7 +461,8 @@
   <div class="panel" id="panel-list" style="width: 22%;">
     <div class="panel-header">
       <span>Redirects</span>
-      <input type="text" class="search-input" id="search" placeholder="Search..." style="width: 140px; margin-left: auto;">
+      <button class="btn btn-sm" onclick="jumpToNextPending()" title="Jump to next pending item" style="margin-left:auto;">Next pending</button>
+      <input type="text" class="search-input" id="search" placeholder="Search..." style="width: 140px;">
     </div>
     <div class="panel-body" id="redirect-list"></div>
   </div>
@@ -674,21 +676,21 @@ function renderDetail() {
   el.innerHTML = `
     <div class="detail-row">
       <div class="detail-label">From (line ${r.line})</div>
-      <div class="detail-value ${hc}"><a href="${escHtml(fullFrom)}" target="_blank">${escHtml(fullFrom)}</a></div>
+      <div class="detail-value ${hc}" style="user-select:text"><a href="${escHtml(fullFrom)}" target="_blank">${escHtml(r.from)}</a></div>
     </div>
     <div class="detail-row">
       <div class="detail-label">To</div>
-      <div class="detail-value ${hc}"><a href="${escHtml(fullTo)}" target="_blank">${escHtml(fullTo)}</a></div>
+      <div class="detail-value ${hc}" style="user-select:text"><a href="${escHtml(fullTo)}" target="_blank">${escHtml(r.to)}</a></div>
     </div>
     ${dupeInfo}
     <div class="detail-row">
       <div class="detail-label">Status: <strong style="color:${statusColor(r.status)}">${r.status.toUpperCase()}</strong></div>
     </div>
-    <div class="detail-row">
-      <div class="detail-label">Notes</div>
-      <textarea class="notes-area" id="notes-input" placeholder="Add notes..."
+    ${r.status === 'flagged' ? `<div class="detail-row">
+      <div class="detail-label">Corrected URL</div>
+      <textarea class="notes-area" id="notes-input" placeholder="Enter corrected URL..."
         oninput="updateNotes(this.value)">${escHtml(r.notes)}</textarea>
-    </div>`;
+    </div>` : ''}`;
 }
 
 // ─── Render previews ─────────────────────────────────────────────
@@ -710,11 +712,14 @@ function renderPreviews() {
   const fullFrom = document.getElementById('from-prefix').value + r.from;
   const fullTo = document.getElementById('to-prefix').value + r.to;
 
+  const corrected = r.status === 'flagged' && r.notes.trim() ? r.notes.trim() : null;
+  const toUrl = corrected || fullTo;
+
   fromUrlEl.textContent = fullFrom;
-  toUrlEl.textContent = fullTo;
+  toUrlEl.textContent = toUrl;
 
   setIframe(fromWrap, 'iframe-from', fullFrom, 'placeholder-from');
-  setIframe(toWrap, 'iframe-to', fullTo, 'placeholder-to');
+  setIframe(toWrap, 'iframe-to', toUrl, 'placeholder-to');
 }
 
 function setIframe(wrap, iframeId, url, placeholderId) {
@@ -729,11 +734,10 @@ function setIframe(wrap, iframeId, url, placeholderId) {
   }
 
   let iframe = document.getElementById(iframeId);
+
   if (!iframe) {
     iframe = document.createElement('iframe');
     iframe.id = iframeId;
-    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');
-    iframe.setAttribute('loading', 'lazy');
     clip.appendChild(iframe);
   }
   iframe.src = url;
@@ -766,13 +770,57 @@ function markStatus(status) {
   changeCount++;
   autoSave();
   updateStats();
-  navigate(1);
+  if (status === 'flagged') {
+    renderList();
+    renderDetail();
+    renderPreviews();
+    requestAnimationFrame(() => {
+      const input = document.getElementById('notes-input');
+      if (input) input.focus();
+    });
+  } else {
+    navigate(1);
+  }
 }
 
 function updateNotes(val) {
   if (selectedId === null) return;
   redirects[selectedId].notes = val;
   autoSave();
+  // Update the "to" pane with the corrected URL (don't touch "from")
+  if (val.trim()) {
+    const toWrap = document.getElementById('preview-to-wrap');
+    const toUrlEl = document.getElementById('preview-to-url');
+    toUrlEl.textContent = val.trim();
+    setIframe(toWrap, 'iframe-to', val.trim(), 'placeholder-to');
+  }
+}
+
+function jumpToNextPending() {
+  const idx = filteredIds.indexOf(selectedId);
+  for (let i = idx + 1; i < filteredIds.length; i++) {
+    if (redirects[filteredIds[i]].status === 'pending') {
+      selectItem(filteredIds[i]);
+      return;
+    }
+  }
+  // Wrap around from the start
+  for (let i = 0; i <= idx; i++) {
+    if (redirects[filteredIds[i]].status === 'pending') {
+      selectItem(filteredIds[i]);
+      return;
+    }
+  }
+}
+
+function previewCorrected() {
+  if (selectedId === null) return;
+  const url = redirects[selectedId].notes.trim();
+  if (!url) return;
+  const toWrap = document.getElementById('preview-to-wrap');
+  const toUrlEl = document.getElementById('preview-to-url');
+  toUrlEl.textContent = url;
+  setIframe(toWrap, 'iframe-to', url, 'placeholder-to');
 }
 
 function navigate(dir) {
@@ -922,6 +970,11 @@ function reloadFrame(which) {
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
     if (e.key === 'Escape') e.target.blur();
+    if (e.key === 'Enter' && e.target.id === 'notes-input') {
+      e.preventDefault();
+      e.target.blur();
+      navigate(1);
+    }
     return;
   }
   switch(e.key.toLowerCase()) {
